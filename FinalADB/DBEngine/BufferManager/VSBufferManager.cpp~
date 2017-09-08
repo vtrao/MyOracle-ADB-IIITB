@@ -1,0 +1,601 @@
+#include "VSBufferManager.h"
+#include "standards.h"
+#define FILENAME "sample"
+VSBufferManager* VSBufferManager :: singleInstance_C=0;
+
+VSBufferManager* VSBufferManager::getInstance()
+ 	{
+	if(singleInstance_C==0)
+		singleInstance_C=new VSBufferManager();
+	return singleInstance_C;	
+	}
+
+VSBufferManager :: VSBufferManager()
+	{
+#ifdef DBCONDES
+	printf("\nBufferManager: Constructed");
+#endif
+	numPagesRead_C=0;
+	numPagesWrite_C=0;
+	numberOfDiskAccesses_C=0;
+	totNumPagesRead_C=0;
+	totNumPagesWritten_C=0;
+	numDiskWrites_C=0;
+	numDiskReads_C=0;
+	}
+
+void VSBufferManager :: queryStats()
+	{
+	printf("\n\tBufferStats for this Query");
+	printf("\n\t\tBufferReads:  \"%d\"",numPagesRead_C);
+	printf("\n\t\tBufferWrites: \"%d\"",numPagesWrite_C);
+	printf("\n\n\tDiskStats for this Query");
+	printf("\n\t\tDiskReads:    \"%d\"",numDiskReads_C);
+	printf("\n\t\tDiskWrites:   \"%d\"\n",numDiskWrites_C);
+	numPagesRead_C=0;
+	numPagesWrite_C=0;
+	numDiskReads_C=0;
+	numDiskWrites_C=0;
+	}
+		
+void VSBufferManager :: initializeBufferPool(int numberOfFrames,DiskSpaceManagerLinux *dsml, 
+                                                                       ReplacementPolicy *rp)
+	{
+	replacement_Policy_C=rp;
+        dSML=dsml;
+	frames_C=0;	
+	int i=0;	
+	number_Of_Frames_C=numberOfFrames;
+	number_Of_Hits_C=0;
+#ifdef DEBUG
+	printf("\n\tBufferManager: initializeBufferPool()");
+#endif	
+//Allocating memory for n frames in  BufferPool
+	if((frames_C=(FrameClass *)MSF::myMalloc(sizeof(FrameClass)*number_Of_Frames_C))==NULL)
+		{
+#ifdef DEBUG
+        printf("\n\t\t***Exception:Memory Allocation Failed");
+#endif
+		}
+	else
+		{
+		for(i=0;i<number_Of_Frames_C;i++)
+			{
+			(frames_C + i)->setPageNumber(EMPTY);
+			(frames_C + i)->setDirtyBit(0);
+			(frames_C + i)->setPriority(0);
+			(frames_C + i)->setData(MSF::myMalloc(PAGESIZE));
+			(frames_C + i)->setAccessCount(0);
+			(frames_C + i)->setFrameNumber(EMPTY);
+			(frames_C + i)->setPinCount(EMPTY);
+			(frames_C + i)->setTimeStamp((time_t)0);
+			}	
+#ifdef DEBUG
+	printf("\n\t\tBufferPool Initialization is Successful with %d Frames",number_Of_Frames_C);
+#endif
+		}	
+	}
+
+int VSBufferManager :: displayBufferPool()
+	{
+	int i=0;
+	int returnFlag=0;
+#ifdef DEBUG	
+	printf("\n\nBufferManager: displayBufferPool()\n");
+#endif	
+	printf("------------------------------------------------------------------------------------------------\n");
+	printf("\n FrameNumber  PageNumber  DirtyBit  AccessCount  Data is at    ArrivalTime   LastAccessTime Priority \n"); 
+	printf("------------------------------------------------------------------------------------------------\n");
+	for(i=0;i<number_Of_Frames_C;i++)
+		printf("%9d%8d%10d%14d %14u%14ld%16ld%10d\n",(frames_C + i)->getFrameNumber(),(frames_C + i)->getPageNumber(),
+							   (frames_C + i)->getDirtyBit(),(frames_C + i)->getAccessCount(),(frames_C + i)->getData(),(frames_C + i)->getTimeStamp(),(frames_C + i)->getLastTimeStamp(),(frames_C + i)->getPriority());
+		printf("------------------------------------------------------------------------------------------------\n");                            
+	if(returnFlag==0)
+		return SUCCESS;
+	else
+		return FAILED;
+	}
+	
+int VSBufferManager :: searchBufferPool(int pageNumber) 
+	{
+	int i=0,returnFlag=0;
+#ifdef DEBUG
+	printf("\n\t\tBufferManager: searchBufferPool()");
+#endif	
+	for(i=0;i<number_Of_Frames_C;i++)
+		{
+		if(((frames_C + i)->getPageNumber())==pageNumber)
+			{
+			returnFlag=1;
+			goto SBPEND;
+			}	
+		}	
+SBPEND:
+	if(returnFlag==1)
+		{
+#ifdef DEBUG
+	printf("\n\t\t\tSearch Successful");
+#endif
+		return i; // returns the matched frameNumber
+		}
+	else
+		{
+#ifdef DEBUG
+	printf("\n\t\t\tSearch Failed");
+#endif		
+		return FAILED;
+		}
+	}	
+	
+int VSBufferManager :: getEmptyFrame()   
+	{		//search for Empty Frame and return its num or FAILED
+	int i=0;
+	int returnFlag=0;
+#ifdef DEBUG	
+	printf("\n\t\tBufferManager: getEmptyFrame()");
+#endif	
+	for(i=0;i<number_Of_Frames_C;i++)
+		if(((frames_C + i)->getPageNumber())==EMPTY)
+			{
+			returnFlag=1;
+			goto GEFEND;
+			}
+GEFEND:
+	if(returnFlag==1)
+		{
+#ifdef DEBUG
+	printf("\n\t\t\t%d Frame is Empty",i);
+#endif
+	return i; // returning the empty frame number
+		}
+	else
+		{
+#ifdef DEBUG
+	printf("\n\t\t\tNo Frame is Empty");
+#endif		
+		return FAILED;
+		}
+	}
+
+void VSBufferManager :: getPageIntoBuffer(int pageNumber, int frameNumber)
+	{
+	time_t timeInMillisec = time(NULL);
+#ifdef DEBUG	
+	printf("\n\t\tBufferManager: getPageIntoBuffer()");
+#endif	
+	(frames_C + frameNumber)->setPageNumber(pageNumber);
+	(frames_C + frameNumber)->setFrameNumber(frameNumber);
+	(frames_C + frameNumber)->setAccessCount(0);
+	(frames_C + frameNumber)->setPriority(0);
+	(frames_C + frameNumber)->setDirtyBit(0);
+	(frames_C + frameNumber)->setTimeStamp(timeInMillisec);
+	(frames_C + frameNumber)->setLastTimeStamp(timeInMillisec);
+
+	
+#ifdef DEBUG
+	printf("\n\t\t\tGot %d Page to %d Frame",pageNumber,frameNumber);
+#endif
+	}
+					
+
+int VSBufferManager :: readFromBufferPool(int pageNumber,void *data)
+	{
+	numPagesRead_C+=1;
+#ifdef RWDEBUG
+	printf("\n\tBufferManager: readFromBufferPool()");
+#endif		
+	int fNumFound,repFrameNumber; 
+	fNumFound=searchBufferPool(pageNumber);
+	int returnFlag=0,sizeOrFailed;
+	time_t now = time(NULL);
+	void *rData=0;
+	number_Of_Requests_C+=1;
+	if(fNumFound!=FAILED)
+		{
+#ifdef	RWDEBUG
+	printf("\n\t\tRead %d Page into %d Frame\n",pageNumber,fNumFound);
+#endif
+		rData=(frames_C + fNumFound)->getData();
+		memcpy(data,rData,PAGESIZE);
+		incrementAccessCount(fNumFound); // think
+		(frames_C + fNumFound)->setLastTimeStamp(now);
+		number_Of_Hits_C+=1;
+		returnFlag=0; // no need to set but for semantic purpose
+		goto RFBPEND;
+		}
+	else         // page is not in the buffer pool
+		{
+		fNumFound=getEmptyFrame(); // search for any empty frame in buffer pool
+		if(fNumFound!=FAILED)     // empty frame found 
+			{}
+		else    // no empty frame found so Replacement of frame needed
+			fNumFound=replacement_Policy_C ->replaceFrame(frames_C,pageNumber,number_Of_Frames_C,dSML); 
+			// in this else case fNumFound is reset to a replacable frame
+		rData=(frames_C + fNumFound)->getData(); 
+		sizeOrFailed=dSML->readPageFromHDD(pageNumber,rData);
+		totNumPagesRead_C+=1;
+		numDiskReads_C+=1;
+		numberOfDiskAccesses_C+=1;
+		//printf("retu Flag=%d\n",sizeOrFailed);
+		if(sizeOrFailed==FAILED)
+			{
+			returnFlag=1;
+			goto RFBPEND;
+			}
+		else if(sizeOrFailed==0)
+			{
+			returnFlag=2; // think of this later
+			goto RFBPEND;
+			}
+		else	//success
+			{
+#ifdef	RWDEBUG
+	printf("\n\t\tPage %d is brought into Frame %d\n",pageNumber,fNumFound);
+#endif
+			getPageIntoBuffer(pageNumber,fNumFound);
+			incrementAccessCount(fNumFound); // think
+			memcpy(data,rData,PAGESIZE); // we can use rData or (frames_C + fNumFound)->getData()
+			
+			returnFlag=0;
+			goto RFBPEND;
+			}
+		}	
+RFBPEND:
+	if(returnFlag==1)
+		{
+		printf("Data cannot be read\n");
+		return FAILED;
+		}
+	else if(returnFlag==2)  // think of this later 
+		{
+		printf("No data at that page\n");	
+		return 2;	
+		}
+	else	
+		return SUCCESS;
+	}
+
+int VSBufferManager :: writeToBufferPool(int pageNumber,void* data)
+	{
+	numPagesWrite_C+=1;
+	int fNumFound,returnFlag=0;
+	time_t now= time(NULL);
+	fNumFound=searchBufferPool(pageNumber);
+	number_Of_Requests_C+=1;
+	void *wData;
+#ifdef RWDEBUG
+        printf("\n\tBufferManager: writeToBufferPool()");
+#endif
+		
+	if(fNumFound!=FAILED) // frame is in Buffer Pool
+		{
+#ifdef RWDEBUG
+	printf("\n\t\tPage %d Found at %d Frame\n",pageNumber,fNumFound);
+#endif
+		number_Of_Hits_C+=1;
+		wData=(frames_C + fNumFound)->getData();
+		memcpy(wData,data,PAGESIZE);
+		(frames_C + fNumFound)->setDirtyBit(1);
+		incrementAccessCount(fNumFound);
+		(frames_C + fNumFound)->setLastTimeStamp(now);
+		returnFlag=0; // for semantic sake success
+		goto WTBPEND;
+		}
+	else // page is taken out and hence not found in bufferpool
+		{
+		fNumFound=getEmptyFrame(); // search for any empty frame in buffer pool	
+		if(fNumFound!=FAILED)     // empty frame found 
+			{}
+		else    // no empty frame found so Replacement of frame needed
+			fNumFound=replacement_Policy_C ->replaceFrame(frames_C,pageNumber,number_Of_Frames_C,dSML); 
+			// in this else case fNumFound is reset to a replacable frame
+		
+#ifdef	RWDEBUG
+	printf("\n\t\tPage %d is brought into Frame %d\n",pageNumber,fNumFound);
+#endif
+		wData=(frames_C + fNumFound)->getData(); 
+		memcpy(wData,data,PAGESIZE); 
+		getPageIntoBuffer(pageNumber,fNumFound);
+		(frames_C + fNumFound)->setDirtyBit(1);
+		incrementAccessCount(fNumFound); // think		
+		returnFlag=0;
+		goto WTBPEND;			
+		}	
+WTBPEND:
+	if(returnFlag==1)
+		return FAILED;	
+	else
+		return SUCCESS;
+	}
+
+	
+VSBufferManager :: ~VSBufferManager()
+	{
+	commitAndReleasePool();
+	dSML->~DiskSpaceManagerLinux();
+#ifdef DBCONDES
+	printf("\nBufferManager: Destructed");
+#endif	
+#ifdef VERBOSEMODE
+	printf("\nAllocation Factor is %d",MSF::memCount);
+	if(MSF::memCount==0)	printf("\t\t >--------------->NO MemoryLeaks\n");
+	else			printf("\t\t >--------------->MemoryLeaks exists\n");
+	printf("\nTotalNumber of Disk Accesses: \"%d\"",totNumPagesRead_C+totNumPagesWritten_C);
+	printf("\nTotalNumber of Disk Reads   : \"%d\"",totNumPagesRead_C);
+	printf("\nTotalNumber of Disk Writes  : \"%d\"",totNumPagesWritten_C);
+	displayBufferStatisitics();
+#endif	
+	}
+
+void VSBufferManager :: setReplacementPolicy(ReplacementPolicy *replacementPolicy)
+	{
+	replacement_Policy_C=replacementPolicy;
+	}
+
+ReplacementPolicy* VSBufferManager :: getReplacementPolicy()
+	{
+	return replacement_Policy_C;
+	} 
+
+int VSBufferManager :: commitBufferPool()
+	{
+	int i=0,returnFlag=0;
+#ifdef DEBUG
+	printf("\n\tBufferManager: commitBufferPool()");
+#endif	
+	if(frames_C!=NULL)
+		{
+		if((frames_C + 0)->getFrameNumber()==-1)
+			{
+			returnFlag=1;
+			goto CBPEND;
+			}
+		for(i=0;i<number_Of_Frames_C;i++)
+			{
+			if((frames_C + i)->getDirtyBit()==1)
+				{
+				dSML->writePageToHDD((frames_C + i)->getPageNumber(),(frames_C + i)->getData());
+				totNumPagesWritten_C+=1;
+				numDiskWrites_C+=1;
+				numberOfDiskAccesses_C+=1;
+				(frames_C + i)->setDirtyBit(0);
+				}
+			}		 
+		}	
+CBPEND:		
+	if(returnFlag==1)
+		return FAILED;
+	else
+		return SUCCESS;	
+	}
+
+int VSBufferManager :: commitAndReleasePool()
+	{
+   	commitBufferPool();
+#ifdef DEBUG	
+	printf("\n\tBufferManager:  commitAndRelease()"); 
+#endif	
+	int i=0;
+	for(i=0;i<number_Of_Frames_C;i++)
+		{
+		MSF::myFree((frames_C + i)->getData());	
+		}	
+	MSF::myFree(frames_C);
+	frames_C=NULL;
+	}
+
+int VSBufferManager :: resetBufferPool(int numberOfFrames)
+	{
+	//resets the total BufferPool and returns SUCCESS or FAILED defined in standards.h
+	unsigned int nof=0;
+	commitAndReleasePool();	
+	number_Of_Requests_C=0;
+	number_Of_Hits_C=0;
+	printf("Enter the no of frames:\t");
+	scanf("%d",&nof);
+	initializeBufferPool(nof,dSML,replacement_Policy_C);
+	}
+
+int VSBufferManager :: commitFrame(int frameNumber)                  
+	{
+	//if dirty bit is set then commit the frame to HDD
+	return 0;
+	}
+
+void VSBufferManager :: incrementAccessCount(int frameNumber)
+	{
+	(frames_C + frameNumber)->setAccessCount((frames_C + frameNumber)->getAccessCount() + 1);
+	}
+
+int VSBufferManager :: incrementPriority(int frameNumber)
+	{
+	(frames_C + frameNumber)->setPriority((frames_C + frameNumber)->getPriority() + 1);
+	return 0;	
+	}
+
+int VSBufferManager :: setPagePriority(int pageNumber,unsigned int priority)
+	{
+	int fNumFound;
+	unsigned int  temp=0,ts=0;
+			
+         fNumFound=searchBufferPool(pageNumber);
+		if(fNumFound!=FAILED)
+		{
+		//ts = (frames_C + fNumFound)->getTimeStamp();
+		//ts= ts/100000;
+		//temp= priority * 1000000 +ts;
+		//printf("ts = %u, temp = %u\n",ts,temp);
+		(frames_C +fNumFound)->setPriority(priority);
+		return SUCCESS;	
+		}
+		else
+		return FAILED;
+	}
+
+	
+ReplacementPolicy * VSBufferManager :: getRPFromFactory(int type)
+	{
+	if(type==RPLIFO)
+		{			
+#ifdef DEBUG		
+		printf("\n\t\tLIFO returned");
+#endif		
+		return (LIFO :: getInstance());
+		}
+	else if(type==RPFIFO)
+		{
+#ifdef DEBUG			
+		printf("\n\t\tFIFO returned");
+#endif		
+		return (FIFO :: getInstance());
+		}
+	else if(type==RPLRU)
+		{
+#ifdef DEBUG			
+		printf("\n\t\tLRU returned");
+#endif		
+		return (LRU :: getInstance());
+		}
+
+	else if(type==RPMRU)
+		{
+#ifdef DEBUG			
+		printf("\n\t\tMRU returned");
+#endif		
+		return (MRU :: getInstance());
+		}
+	else if(type==RPRANDOM)
+		{
+#ifdef DEBUG			
+		printf("\n\t\tRANDOM returned");
+#endif		
+		return (RANDOM :: getInstance());
+		}
+	else if(type==RPACP)
+		{
+#ifdef DEBUG			
+		printf("\n\t\tACP returned");
+#endif		
+		return (ACP :: getInstance());
+		}
+
+	}
+
+//For debugging Purpose
+
+
+//For statistics Purpose to know the efficiency of ReplacementPolicy
+void VSBufferManager :: displayBufferStatisitics()
+	{
+	printf("\n BufferStats:\n------------------------------------------------------------------------------------------------\n");
+	printf("\n Number of Frames %d \nTotal Requests are : %d",number_Of_Frames_C,number_Of_Requests_C);
+	printf("\t\tTotal Number of Hits are : %d",number_Of_Hits_C);
+	printf("\t\tTotal Number of Misses are : %d", (number_Of_Requests_C - number_Of_Hits_C));
+	if(number_Of_Requests_C!=0)
+		printf("\n\t\t\t Hit Ratio is %f\n",(float(float(number_Of_Hits_C)/float(number_Of_Requests_C))*100));	
+	else printf("\n");
+	}
+
+
+int main(int argc,char *argv[])
+	{
+	system("clear");
+	int i,choice=0,temp=0,result;
+	unsigned int priority=0,nof=0;
+	printf("\nEnter the number of Frames\n\t");
+	scanf("%d",&nof);
+	ReplacementPolicy *rp=LIFO :: getInstance();
+	DiskSpaceManagerLinux *dsm= DiskSpaceManagerLinux::getInstance("venki");
+	VSBufferManager *vsb= VSBufferManager::getInstance();
+	vsb->initializeBufferPool(nof,dsm,rp);
+	char *venki=(char*)MSF::myMalloc(PAGESIZE);
+	void *data;
+	data=MSF::myMalloc(PAGESIZE);
+	while(nof!= -1)
+		{
+		printf("\n------------------------------------------------------------------------------------------------\n");
+		printf("\n 1 for Read a page into Buffer pool");
+		printf("\n 2 for Write page to BufferPool");
+		printf("\n 3 for Display Buffer Pool");
+		printf("\n 4 for setting Replacement policy");
+		printf("\n 6.for Commit buffer pool");
+		printf("\n 7.for Reset Buffer");
+		printf("\n 5 for Exit\n\t");
+		scanf("%d",&choice);
+		switch(choice)
+			{
+			case 1: printf("\n\tEnter the page Number in the file\n\t\t");
+				scanf("%d",&temp);
+				//printf("\nValue %d\n",vsb->readFromBufferPool(FILENAME,temp,data));
+				result= vsb->readFromBufferPool(temp,data);
+				//printf("result= %d",result);
+				if(result== SUCCESS)
+				{
+				printf("\tEnter priority of given page Number:\n\t\t");
+                              	scanf("%d",&priority);
+                               	vsb->setPagePriority(temp,priority);
+				printf("\nData Read: %s",(char*)data);
+				}
+
+				break;
+			case 2: printf("\n\tEnter the pageNumber to write to buffer pool\n\t\t");
+				scanf("%d",&temp);
+				printf("\n\tEnter the data to write to buffer pool\n\t\t");
+				scanf("%s",venki);
+				vsb->writeToBufferPool(temp,(void*)(venki));
+				printf("\tEnter priority of given page Number:\n\t\t");
+                              	scanf("%d",&priority);
+                               	vsb->setPagePriority(temp,priority);
+
+				break;
+			case 3: //printf("\n\tContents of BufferPool\n");
+				vsb->displayBufferPool();
+				vsb->displayBufferStatisitics();
+				break;
+			case 4:
+				printf("\n\t Enter 1 for LIFO");
+				printf("\n\t Enter 2 for FIFO");	
+				printf("\n\t Enter 3 for LRU");
+				printf("\n\t Enter 4 for MRU");
+				printf("\n\t Enter 5 for RANDOM");
+				printf("\n\t Enter 6 for ACP\n");
+				scanf("%d",&temp);
+				vsb->setReplacementPolicy(vsb->getRPFromFactory(temp));		
+				break;
+			case 5:
+				MSF::myFree(data);
+				MSF::myFree(venki);
+				vsb->~VSBufferManager();
+				exit(0);	
+			case 6: //printf("\n\tContents of BufferPool\n");
+			       if(nof==0)
+                               printf("Buffer not initialized\n");
+                               else
+                               	{
+                               	i=vsb->commitBufferPool();
+                               	if(i==SUCCESS)
+                               		printf("The buffer pool is committed\n");
+                               	else if(i==FAILED)
+	                               printf("No pages in buffer to commit\n");
+                               	else
+        	                       printf("The buffer pool is not committed\n");
+                               	}
+                               break;
+			case 7:
+				if(nof==0)
+                	               	printf("Buffer not initialized\n");
+                                else
+                        	        {
+					i=vsb->resetBufferPool(nof);
+					printf("Buffer is reset \n");
+	 				}
+				break;
+				
+			
+			default: printf("\nEnter correct Choice\n");	
+			}
+	
+		}
+	}
+	
+  ndex 

@@ -1,0 +1,39 @@
+VSD : BufferManager/standards.o BufferManager/FrameClass.o BufferManager/LIFO.o BufferManager/MRU.o HSH.o BufferManager/RANDOM.o BufferManager/ACP.o BufferManager/LRU.o BufferManager/FIFO.o BufferManager/DiskSpaceManagerLinux.o BufferManager/VSBufferManager.o BufferManager/FLH.o  VIndexManager.h SysCatHan.o TLQH.o RLQH.o DLQH.o CreateDBMS.o VSDBEngine.o VSDBEngine.h pdstandards.h
+	g++ -g BufferManager/standards.cpp BufferManager/FrameClass.cpp BufferManager/LIFO.cpp BufferManager/MRU.cpp BufferManager/LRU.cpp BufferManager/ACP.cpp BufferManager/RANDOM.cpp BufferManager/FIFO.cpp BufferManager/DiskSpaceManagerLinux.cpp BufferManager/VSBufferManager.cpp BufferManager/FLH.cpp VIndexManager.cpp SysCatHan.cpp HSH.cpp TLQH.cpp RLQH.cpp DLQH.cpp CreateDBMS.cpp VSDBEngine.cpp -o VSD
+VIndexManager.o : VIndexManager.h BufferManager/standards.h BufferManager/FLH.h
+	g++ -c VIndexManager.h	
+DLQH.o : DLQH.cpp VSDBEngine.h BufferManager/standards.h pdstandards.h
+	g++ -c DLQH.cpp
+TLQH.o : TLQH.cpp VSDBEngine.h BufferManager/standards.h pdstandards.h
+	g++ -c TLQH.cpp
+RLQH.o : RLQH.cpp VSDBEngine.h BufferManager/standards.h pdstandards.h
+	g++ -c RLQH.cpp
+CreateDBMS.o : CreateDBMS.cpp VSDBEngine.h BufferManager/standards.h pdstandards.h
+	g++ -c CreateDBMS.cpp
+HSH.o : HSH.cpp VSDBEngine.h BufferManager/standards.h pdstandards.h
+	g++ -c CreateDBMS.cpp
+SysCatHan.o : SysCatHan.cpp VSDBEngine.h BufferManager/standards.h pdstandards.h
+	g++ -c SysCatHan.cpp
+BufferManager/FLH.o:	BufferManager/VSBufferManager.h BufferManager/standards.h BufferManager/FLH.h
+	g++ -c BufferManager/FLH.cpp	
+BufferManager/VSBufferManager.o:  BufferManager/VSBufferManager.cpp BufferManager/standards.h
+	g++ -c BufferManager/VSBufferManager.cpp 
+BufferManager/DiskSpaceManagerLinux.o : BufferManager/DiskSpaceManagerLinux.cpp BufferManager/standards.h
+	g++ -c BufferManager/DiskSpaceManagerLinux.cpp
+BufferManager/FrameClass.o: BufferManager/FrameClass.cpp BufferManager/standards.h
+	g++ -c BufferManager/FrameClass.cpp
+BufferManager/ACP.o : BufferManager/ACP.cpp BufferManager/standards.h
+	g++ -c BufferManager/ACP.cpp
+BufferManager/RANDOM.o : BufferManager/RANDOM.cpp BufferManager/standards.h
+	g++ -c BufferManager/RANDOM.cpp	
+BufferManager/MRU.o : BufferManager/MRU.cpp BufferManager/standards.h
+	g++ -c BufferManager/MRU.cpp
+BufferManager/LIFO.o : BufferManager/LIFO.cpp BufferManager/standards.h
+	g++ -c BufferManager/LIFO.cpp
+BufferManager/FIFO.o : BufferManager/FIFO.cpp BufferManager/standards.h
+	g++ -c BufferManager/FIFO.cpp
+BufferManager/LRU.o : BufferManager/LRU.cpp BufferManager/standards.h
+	g++ -c BufferManager/LRU.cpp
+BufferManager/standards.o : BufferManager/standards.cpp BufferManager/standards.h
+	g++ -c BufferManager/standards.cpp
+									

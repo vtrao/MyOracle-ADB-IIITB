@@ -1,0 +1,888 @@
+//This is the Parser file of the RDBMSProject developed by Venkata Thippanna Rao. P. R as a part of
+//Advanced DataBases course @ IIITB
+/*
+ *
+ *
+ *
+ */
+ 
+%{
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <stdlib.h>
+ #include "DBEngine/VSDBEngine.h"
+ #include "DBEngine/BufferManager/standards.h"
+ #define DEFINTLEN    5
+ #define DEFCHARLEN   6
+ #define DEFDATELEN   10
+ #define UDBFILE      "udbfile"
+ void goToPrompt();
+ int yyparse (void *YYPARSE_PARAM);
+ void yyerror(char *error);
+ int yylex();
+ void resetOnError();
+ void doORorAND(int);
+ void start();
+ 
+ time_t startT;
+ time_t endT;
+ char  notNullFlag=NO,uniqueFlag=NO,primaryKeyFlag=NO;
+ short dataTypeFlag=0;
+ int length=0,precision=0; //-1 specifies that the value is not taken
+ char *columnName=0;
+ char *defaultValue=0;
+ char *tableName=0;
+ char *dbName=0;
+ short position=0;
+ createColumns *cColumns=NULL;
+ FieldNames *pkeyNames=NULL;
+ FieldNames *uniqueNames=NULL;
+ FieldNames *tempFieldNames=NULL;
+ TLQds *tLQds=0;
+ 
+ short whereExistsFlag=0;
+ AttributeValues *aValues=NULL;
+ FieldNames      *fNames=NULL;
+ RLQds *rLQds=0;
+ 
+ RID *ridList=NULL,*tempRIDList=NULL;
+ RID *nextList=NULL;
+ int selectsErrFlag=SUCCESS;
+  
+ //for Database level queriesssssssssss
+ int DBQuery(char *dbname,int type);
+ int TLQuery(int type);
+ int RLQuery(int type);
+ void getInputFromFile(char*,int,int);
+ 
+short promptFlag=0;
+
+ UQH *updateHan;
+ SQH *selectHan;
+ DQH *deleteHan;
+ VSDBEngine *dbe;
+ VSBufferManager *vSB=NULL;
+%}
+
+%token SELECT INSERT UPDATE DELETE CREATE DROP ALTER COMMIT EXITST GET TO
+%token INTNUM APPROXNUM IDENTIFIER NEWLINE TABLE LEFTPARANTHESIS RIGHTPARANTHESIS INTO DATABASE
+%token SHOW CLEAR FROM DOT COMMA CHARACTER INTEGER DATE NOT NULLX UNIQUE PRIMARY KEY DEFAULT
+%token ALL DISTINCT STAR WHERE OR AND VALUES ISEQUALTO SET ADD SET STRING DATELITERAL
+%token GREATERTHAN LESSTHAN GREATERTHANE LESSTHANE NOTEQUALTO USE DESC
+%start s
+%%
+/* Conventions used in defining the grammar G={V,T,P,S} all small lettered words for set of V-Variables or NonTerminals,
+         all Capital lettered words for set T-Terminals, S is the Start Symbol of the Grammar,set P is defined as follows*/
+
+/* Grammer We mean Production set starts from here */  
+
+/* S is the Start Symbol of the Grammar,*/
+ 
+s	:  
+	| s start NEWLINE  { if(promptFlag==1)	goToPrompt(); }
+	| NEWLINE          { if(promptFlag==1)	goToPrompt(); }
+	;
+	
+start   : databaselevel_statements  
+	| tablelevel_statements 
+	| getcommand_statement    
+	| recordlevel_statements   
+//	| debug_statements          
+	| misc_statements           
+	| EXITST          {
+			  FILE *tt1=fopen(UDBFILE,"w");
+			  fprintf(tt1,"%s",DLQH::dBName);
+			  fclose(tt1);
+			  dbe->~VSDBEngine(); 
+			  printf("\n\t\t\t Thank Q\n"); 
+			  exit(0);
+			  }           
+	| CLEAR           {system("clear");}// goToPrompt();}
+	;
+
+getcommand_statement	 : GET IDENTIFIER INTNUM TO INTNUM	{ 
+								printf("\n\t\"%s\" is file requested for input and from line %s  to  line %s\n",
+										(char*)$2,(char*)$3,(char*)$5);
+								if(access((char*)$2,F_OK)!=0) 
+									printf("\n\t\tSorry! \"%s\" file doesnot exist to input\n",(char*)$2);
+								else
+									getInputFromFile((char*)$2,atoi((char*)$3),atoi((char*)$5));	
+								}
+												
+
+databaselevel_statements : CREATE DATABASE IDENTIFIER {DBQuery((char*)$3,CREATEDATABASE);}
+                         | DROP   DATABASE IDENTIFIER {DBQuery((char*)$3,DROPDATABASE);}
+			 | USE             IDENTIFIER {DBQuery((char*)$2,USEDATABASE);}
+			 | SHOW   	   IDENTIFIER {DBQuery((char*)$2,SHOWDATABASE);}
+			 | SHOW   	 	      {DBQuery(NULL     ,SHOWDATABASE);}
+			 | USE	   		      {DBQuery(NULL     ,SHOWD);} 
+			 ;
+
+tablelevel_statements : create_statement
+	              | drop_statement 
+	              | alter_statement
+		      | desc_statement
+	              ;
+
+recordlevel_statements : select_statement
+		       | insert_statement
+		       | delete_statement
+		       | update_statement
+		       ;
+
+
+//debug_statements : buffer_debugger
+//		 | dbengine_debugger
+//		 | index_debugger
+//		 ;
+		 
+misc_statements  : commit_statement
+		 ;
+		 
+
+/**********************TABLE LEVEL STATEMENTS-->CREATE STATEMENT****************************************/
+
+create_statement : CREATE  TABLE  table  LEFTPARANTHESIS  new_table_elements  RIGHTPARANTHESIS  {
+												time(&startT);	
+												TLQuery(CREATETABLE);		
+												time(&endT);
+												printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+												}
+       	         ;
+		
+table	: IDENTIFIER                   { 
+				       if(dbName==0)	dbName=(char*)MSF::myMalloc(strlen(DLQH::dBName));
+				       strcpy(dbName,DLQH::dBName);	
+				       if(tableName==0)	tableName=(char*)MSF::myMalloc(strlen((char*)$1));
+				       strcpy(tableName,(char*)$1);
+				       }
+	| IDENTIFIER DOT IDENTIFIER    {
+				       if(dbName==0)	dbName=(char*)MSF::myMalloc(strlen((char*)$1));
+				       strcpy(dbName,(char*)$1);
+				       if(tableName==0)	tableName=(char*)MSF::myMalloc(strlen((char*)$3));
+				       strcpy(tableName,(char*)$3);
+				       }// check for database existence if yes ok set DLQH::dBName===so and so and reset it back to previous state
+	;		  
+	
+new_table_elements : new_table_element
+		   | new_table_elements COMMA new_table_element
+		   ;	
+		   
+new_table_element  : column_defination
+                   | table_constraints_defination
+		   ;
+
+column_defination  : IDENTIFIER	 data_type column_defination_options    { 
+									if(columnName==0)	
+										columnName=(char*)MSF::myMalloc(strlen((char*)$1));
+									strcpy(columnName,(char*)$1);	
+									position++;
+									if(length==0)
+										{
+										if(dataTypeFlag==DBINTTYPE)
+											length=DEFINTLEN;
+										else if(dataTypeFlag==DBCHARTYPE)
+											length=DEFCHARLEN;
+										else if(dataTypeFlag==DBDATETYPE)
+											length=DEFDATELEN;
+										}
+									TLQH::InsertToList(&cColumns,columnName,dataTypeFlag,length,precision,
+									               defaultValue,notNullFlag,uniqueFlag,primaryKeyFlag,position);
+									if(columnName!=0)
+										{	
+										MSF::myFree(columnName);
+										columnName=0;
+										}
+									if(defaultValue!=0)
+										{
+										MSF::myFree(defaultValue);
+										defaultValue=0;	
+										}
+									precision=0;
+									length=0;
+									dataTypeFlag=0;	
+									if(notNullFlag==YES)	notNullFlag=NO;
+									if(primaryKeyFlag==YES)	primaryKeyFlag=NO;
+									if(uniqueFlag==YES)	uniqueFlag=NO;	
+									}
+		   ;		   		   
+		   
+data_type          : CHARACTER						{
+									dataTypeFlag=DBCHARTYPE; 
+									length=0;precision=0;
+									}
+	           | CHARACTER LEFTPARANTHESIS INTNUM RIGHTPARANTHESIS  { 
+		   							dataTypeFlag=DBCHARTYPE;
+									length=atoi((char*)$3);
+									precision=0;
+									}
+		   | INTEGER						{ 
+		   							dataTypeFlag=DBINTTYPE;
+									length=0;precision=0;
+									}
+		   | INTEGER   LEFTPARANTHESIS INTNUM RIGHTPARANTHESIS  {
+		   							dataTypeFlag=DBINTTYPE;
+									length=atoi((char*)$3);
+									precision=0;
+									}
+		   | DATE 						{
+		   							dataTypeFlag=DBDATETYPE;
+									length=0;precision=0;
+									}							
+		   | DATE      LEFTPARANTHESIS INTNUM COMMA INTNUM COMMA INTNUM RIGHTPARANTHESIS  {
+		   										  dataTypeFlag=DBDATETYPE;
+												  if(defaultValue==0) 
+													defaultValue=(char*)MSF::myMalloc(strlen((char*)$3)
+																	 +strlen((char*)$5)
+										                                                         +strlen((char*)$7)+2);
+												  strcpy(defaultValue,(char*)$3);
+												  strcat(defaultValue,"\\");
+												  strcat(defaultValue,(char*)$5);
+												  strcat(defaultValue,"\\");
+												  strcat(defaultValue,(char*)$7);
+												  length=0;precision=0;
+												  }
+		   ;
+		   		   
+column_defination_options : 
+			  | column_defination_options column_defination_option
+			  ;
+			  
+column_defination_option  : NOT NULLX			{notNullFlag=YES;}
+			  | NOT NULLX UNIQUE	        {notNullFlag=YES;uniqueFlag=YES;} 
+			  | PRIMARY KEY			{primaryKeyFlag=YES;}
+			  | DEFAULT literal		{
+			  				if(defaultValue==0)	defaultValue=(char*)MSF::myMalloc(strlen((char*)$2));
+							strcpy(defaultValue,(char*)$2);	
+							//printf("\nHERE %s\n",defaultValue);	
+							} 
+			  | DEFAULT NULLX		{
+			  				if(defaultValue==0)	defaultValue=(char*)MSF::myMalloc(strlen((char*)$2));
+							strcpy(defaultValue,(char*)$2);	
+							//printf("\nHERE %s\n",defaultValue);
+			  				} 
+			  | UNIQUE			{
+			  				uniqueFlag=YES;
+			  				}	
+			  ;		  
+
+literal			  : INTNUM			
+			  | APPROXNUM 			
+			  | STRING
+			  | DATELITERAL		//{printf("\n %s is the date\n",(char*)$1);} 			  
+			  ;
+			  
+table_constraints_defination : UNIQUE      LEFTPARANTHESIS columnsT RIGHTPARANTHESIS	{ uniqueNames=tempFieldNames;tempFieldNames=NULL }
+			     | PRIMARY KEY LEFTPARANTHESIS columnsT RIGHTPARANTHESIS	{ pkeyNames=tempFieldNames;  tempFieldNames=NULL }
+			     ;
+			       
+columnsT	: IDENTIFIER 			{RLQH::insertToFdList(&tempFieldNames,  (char*)$1);   }
+		| columnsT COMMA IDENTIFIER  	{RLQH::insertToFdList(&tempFieldNames,(char*)$3);     }
+		;			     			  
+			  
+/**********************TABLE LEVEL STATEMENTS-->DROP STATEMENT******************************************/
+drop_statement   : DROP TABLE table		{
+						time(&startT);	
+						TLQuery(DROPTABLE);	
+						time(&endT);
+						printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+						}
+    	         ;
+
+/**********************TABLE LEVEL STATEMENTS-->DESC STATEMENT******************************************/
+desc_statement   : DESC table			{
+						time(&startT);	
+						TLQuery(SHOWTABLE);	
+						time(&endT);
+						printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+						}
+		 ;
+		 
+/**********************TABLE LEVEL STATEMENTS-->ALTER STATEMENT*****************************************/
+alter_statement : ALTER TABLE table alters  {}
+		;
+		
+alters		: alter
+		| alters COMMA alter
+		;
+
+alter		: ADD IDENTIFIER data_type SET DEFAULT value
+		| ADD IDENTIFIER data_type
+		| DROP IDENTIFIER
+//		| MODIFY
+		;		
+
+/**********************RECORD LEVEL STATEMENTS-->SELECT STATEMENT***************************************/
+select_statement  : SELECT optional_allordistinct selection table_expression {
+									     time(&startT);
+									     RLQuery(SELECTQUERY);
+									     time(&endT);
+									     printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+									     }
+                  ;	 
+		  
+optional_allordistinct :
+		       | ALL
+		       | DISTINCT
+		       ;	
+		       
+selection : STAR
+	  | columns              
+	  ;
+columns		: IDENTIFIER			{	RLQH::insertToFdList(&fNames,(char*)$1);	}
+		| columns COMMA IDENTIFIER  	{	RLQH::insertToFdList(&fNames,(char*)$3);	}
+			 	   		       	  
+table_expression : from_clause 	whereClause 
+		 ;
+		 
+from_clause : FROM table {}
+	    ;	
+
+whereClause :
+	    | WHERE conditionStatement	{whereExistsFlag=1;}
+	    ;			
+	    
+conditionStatement : conditionStatement OR  conditionStatement	{doORorAND(1);}
+		   | conditionStatement AND conditionStatement	{doORorAND(2);}
+	  	   | NOT conditionStatement			{doORorAND(3);}
+	  	   //| LEFTPARANTHESIS conditionStatement RIGHTPARANTHESIS	{printf("\nBetween  %s and %s",(char*)$1,(char*)$3);}
+		   | comparision 
+		   ;		        	
+
+comparision : IDENTIFIER LESSTHAN     literal 
+						{
+						if(ridList==NULL)      selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,LT,(char*)$3,&ridList);
+						else		       selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,LT,(char*)$3,&tempRIDList);	
+						if(selectsErrFlag==FAILED)
+							{
+							fflush(stdin);
+							resetOnError();
+							goToPrompt();
+							}
+							
+						}
+	    | IDENTIFIER LESSTHANE    literal 
+	    					{
+						if(ridList==NULL)	selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,LE,(char*)$3,&ridList);
+						else			selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,LE,(char*)$3,&tempRIDList);
+						if(selectsErrFlag==FAILED)
+							{
+							fflush(stdin);
+							resetOnError();
+							goToPrompt();
+							}
+						}
+	    | IDENTIFIER GREATERTHAN  literal 
+	    					{
+						if(ridList==NULL)	selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,GT,(char*)$3,&ridList);
+						else			selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,GT,(char*)$3,&tempRIDList);
+						if(selectsErrFlag==FAILED)
+							{
+							fflush(stdin);
+							resetOnError();
+							goToPrompt();
+							}
+						}
+	    | IDENTIFIER GREATERTHANE literal 
+	    					{
+						if(ridList==NULL)	selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,GE,(char*)$3,&ridList);
+						else			selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,GE,(char*)$3,&tempRIDList);
+						if(selectsErrFlag==FAILED)
+							{
+							fflush(stdin);
+							resetOnError();
+							goToPrompt();
+							}
+						}
+	    | IDENTIFIER NOTEQUALTO   literal 
+	    					{
+						if(ridList==NULL)	selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,NE,(char*)$3,&ridList);
+						else			selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,NE,(char*)$3,&tempRIDList);
+						if(selectsErrFlag==FAILED)
+							{
+							fflush(stdin);
+							resetOnError();
+							goToPrompt();
+							}
+						}
+	    | IDENTIFIER ISEQUALTO    literal 
+	    					{
+						if(ridList==NULL)	selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,EQ,(char*)$3,&ridList);
+						else			selectsErrFlag=selectHan->getRIDs(tableName,dbName,(char*)$1,EQ,(char*)$3,&tempRIDList);
+						if(selectsErrFlag==FAILED)
+							{
+							resetOnError();
+							goToPrompt();
+							}
+						}
+            ;			
+			
+/**********************RECORD LEVEL STATEMENTS-->INSERT STATEMENT***************************************/
+insert_statement : INSERT INTO  table optional_columns values_must	{
+									time(&startT);	
+									RLQuery(INSERTQUERY);	
+									time(&endT);
+									printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+									} 
+		 ;
+
+optional_columns :
+		 | LEFTPARANTHESIS columns RIGHTPARANTHESIS
+		 ;
+		 
+values_must : VALUES LEFTPARANTHESIS values RIGHTPARANTHESIS		 
+            ;
+	    
+values	: value			{	RLQH::insertToAttList(&aValues,(char*)$1);	}
+	| values COMMA value	{	RLQH::insertToAttList(&aValues,(char*)$3);	}
+	;
+
+value	: literal
+	| NULLX
+	| DEFAULT
+	;			     
+		 
+/**********************RECORD LEVEL STATEMENTS-->UPDATE STATEMENT***************************************/
+update_statement : UPDATE table SET assignments WHERE conditionStatement	{}//RLQuery(UPDATEQUERY);}
+		 ;
+	
+assignments	 :
+		 | assignment
+		 | assignments COMMA assignment
+		 ;
+
+assignment : IDENTIFIER ISEQUALTO literal	{RLQH::insertToFdList(&fNames,(char*)$1);RLQH::insertToAttList(&aValues,(char*)$3);}
+	   | IDENTIFIER ISEQUALTO NULLX		{RLQH::insertToFdList(&fNames,(char*)$1);RLQH::insertToAttList(&aValues,(char*)$3);}
+	   | IDENTIFIER ISEQUALTO DEFAULT	{RLQH::insertToFdList(&fNames,(char*)$1);RLQH::insertToAttList(&aValues,(char*)$3);}
+	   ;
+	   	 	 
+/**********************RECORD LEVEL STATEMENTS-->DELETE STATEMENT***************************************/
+delete_statement : DELETE  FROM  table  whereClause	{
+							time(&startT);	
+							RLQuery(DELETEQUERY);	
+							time(&endT);
+							printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+							}  
+                 ;  
+
+/**********************MISC STATEMENT-->COMMIT STATEMENT************************************************/
+commit_statement : COMMIT	{
+				time(&startT);
+				vSB->commitBufferPool();
+				FILE *tt1=fopen(UDBFILE,"w");
+			  	fprintf(tt1,"%s",DLQH::dBName);
+			  	fclose(tt1);	
+				time(&endT);		  
+				printf("\nExecution Time %lf seconds \n",difftime(endT,startT));
+				}
+		 ;		 
+
+/**********************DEBUG STATEMENTS-->BUFFER DEBUGGER***********************************************/		
+/*buffer_debugger :
+	          ;*/
+
+/**********************DEBUG STATEMENTS-->DBENGINE DEBUGGER*********************************************/
+/*dbengine_debugger :
+	     	    ;*/
+
+/**********************DEBUG STATEMENTS-->INDEX DEBUGGER************************************************/
+/*index_debugger :
+	         ;*/							     
+
+ 	       
+
+%%
+void resetOnError()
+ 	{
+	if(notNullFlag!=NO)	notNullFlag=NO;
+	if(uniqueFlag!=NO)	uniqueFlag=NO; 
+	if(primaryKeyFlag!=NO)  primaryKeyFlag=NO;
+	if(columnName!=0) 	MSF::myFree(columnName);
+	   columnName=0;
+	if(defaultValue!=0)	MSF::myFree(defaultValue);
+	   defaultValue=0;	
+	if(tableName!=0)	MSF::myFree(tableName);	
+	   tableName=0;	
+	if(dbName!=0)		MSF::myFree(dbName);	
+	   dbName=0;	
+	if(position!=0)		position=0;
+	if(cColumns!=NULL)	
+		{
+		createColumns *temp;
+		while(cColumns!=NULL)
+			{
+			temp=cColumns;
+			cColumns=(cColumns)->next;
+			MSF::myFree(temp->columnName);
+			if(temp->defaultValue!=0)	
+			MSF::myFree(temp->defaultValue);
+			MSF::myFree(temp);	
+			}
+		cColumns=NULL;	
+		}   
+	if(pkeyNames!=NULL)	
+		{
+		RLQH::freeFdList(pkeyNames);
+		pkeyNames=NULL;
+		}
+	if(uniqueNames!=NULL)	
+		{
+		RLQH::freeFdList(uniqueNames);
+		uniqueNames=NULL;
+		}
+	if(tempFieldNames!=NULL)	
+		{
+		RLQH::freeFdList(tempFieldNames);
+		tempFieldNames=NULL;
+		}		
+	if(whereExistsFlag!=0)	whereExistsFlag=0;
+	if(aValues!=NULL)	
+		{
+		RLQH::freeAttList(aValues);
+		aValues=NULL;
+		}
+	if(fNames!=NULL)	
+		{
+		RLQH::freeFdList(fNames);
+		fNames=NULL;
+		}
+	if(ridList!=NULL)	RH::freeRIDList(ridList);
+	if(tempRIDList!=NULL)	RH::freeRIDList(tempRIDList);
+	if(nextList!=NULL)	RH::freeRIDList(nextList);
+	nextList=NULL;
+	ridList=NULL;	
+	tempRIDList=NULL;
+	selectsErrFlag=SUCCESS;			
+	}
+	
+/* Write the code for main function to solve the problem set */
+extern FILE *yyin;
+
+void yyerror(char *s)
+	{
+	printf("\nSyntax Error\n");
+        //fprintf(stderr,"syntax error! check your syntax\n",s);
+	resetOnError();
+	goToPrompt();
+        }
+	
+void goToPrompt()
+	{
+	fflush(stdin);
+	printf("\nRDBMSP>");
+        yyin=stdin;
+        yyparse();
+	}
+
+	
+void doORorAND(int optype)
+ 	{
+	RID *temp1,*temp2;
+	//RH::displayRIDList(ridList);
+	//RH::displayRIDList(tempRIDList);
+	temp1=ridList;
+	temp2=tempRIDList;
+	if(optype==1)//OR
+		{
+		while(temp1!=NULL)
+			{
+			RH::insertToRIDList(&nextList,temp1->pageNumber,temp1->slotID);
+			temp1=temp1->next;
+			}
+			
+		temp1=ridList;
+		while(temp1!=NULL)
+			{
+			while(temp2!=NULL)
+				{
+				if(temp1->pageNumber==temp2->pageNumber && temp1->slotID==temp2->slotID) {}//do nothing
+				else	RH::insertToRIDList(&nextList,temp2->pageNumber,temp2->slotID);
+				temp2=temp2->next;
+				}
+			temp1=temp1->next;
+			}	
+		}
+	else if(optype==2)//AND
+		{
+		while(temp1!=NULL)
+			{
+			temp2=tempRIDList;
+			while(temp2!=NULL)
+				{
+				//printf("\nTEMP1 %ld %d; TEMP2 %ld %d",temp1->pageNumber,temp1->slotID,temp2->pageNumber,temp1->slotID);
+				if(temp1->pageNumber==temp2->pageNumber && temp1->slotID==temp2->slotID) 
+					RH::insertToRIDList(&nextList,temp2->pageNumber,temp2->slotID);
+				temp2=temp2->next;
+				}
+			temp1=temp1->next;	
+			}
+		}
+	else		//NOT
+		{
+		
+		}
+	if(ridList!=NULL)	RH::freeRIDList(ridList);
+	ridList=NULL;
+	if(tempRIDList!=NULL)	RH::freeRIDList(tempRIDList);
+	tempRIDList=NULL;
+	}	
+	
+int RLQuery(int type)
+	{
+	int retValue=SUCCESS;
+	if(whereExistsFlag==1)
+		{
+		//code to handle the where clause tree structure
+		//printf("\n venki is here");
+		//RH::displayRIDList(nextList);
+		//RH::displayRIDList(ridList);
+		if(type==SELECTQUERY)
+			{
+			if(nextList!=NULL)	selectHan->displayRIDListOnRetreival(tableName,dbName,fNames,nextList);
+			else			selectHan->displayRIDListOnRetreival(tableName,dbName,fNames,ridList);
+			fNames=NULL;
+			nextList=NULL;
+			ridList=NULL;
+			}
+		else if(type==UPDATEQUERY)
+			{
+			}
+		else if(type==DELETEQUERY)
+			{
+			if(nextList!=NULL)	deleteHan->executeDelete(nextList,tableName,dbName);
+			else			deleteHan->executeDelete(ridList,tableName,dbName);
+			nextList=NULL;
+			ridList=NULL;
+			}
+		}
+	else
+		{	
+		//printf("\nIN RLQH HANDLER %s is tableName and %s is dbName\n",tableName,dbName);
+		//RLQH ::displayList(aValues,fNames);
+		rLQds=(RLQds*)MSF::myMalloc(sizeof(RLQds));
+		rLQds->queryType=type;
+		rLQds->values=aValues;
+		rLQds->names=fNames;
+		rLQds->objectName=(char*)MSF::myMalloc(strlen(tableName));
+		//printf("\n venki after allocating tablename");
+		strcpy(rLQds->objectName,tableName);
+		if(dbName!=0)
+			{
+			rLQds->dbname=(char*)MSF::myMalloc(strlen(dbName));
+			strcpy(rLQds->dbname,dbName);
+			MSF::myFree(dbName);
+			dbName=0;
+			//printf("\n venki is here After freeing memory");
+			}	
+		else
+			{
+			rLQds->dbname=(char*)MSF::myMalloc(strlen(DLQH::dBName));
+			strcpy(rLQds->dbname,DLQH::dBName);
+			//printf("\n venki after allocating dbname");
+			}
+		if(type==UPDATEQUERY)	
+					{
+					if(nextList!=NULL)	updateHan->updateQueryHandler(rLQds,nextList);
+					else			updateHan->updateQueryHandler(rLQds,ridList);
+					fNames=NULL;
+					nextList=NULL;
+					ridList=NULL;
+					}
+		else	
+			{
+			//int i=0;
+			//for(i=0;i<100000;i++)
+			retValue=dbe->executeQuery(rLQds,NULL);//calling the DBEngine Facade Interface		
+			}
+		RLQH::freeList(rLQds); //problem to be solved	
+		//printf("\n After freeing the rLQDS");
+		fNames=NULL;
+		aValues=NULL;
+		rLQds=0;
+		MSF::myFree(tableName);
+		tableName=0;
+		printf("\n\n");
+		}
+	vSB->displayBufferStatisitics();	
+	vSB->queryStats();	
+	resetOnError();	
+	}	
+	
+int TLQuery(int type)
+	{
+	int retValue=SUCCESS;
+	tLQds=(TLQds*)MSF::myMalloc(sizeof(TLQds));
+	tLQds->queryType=type;
+	if(dbName!=0)
+		{
+		tLQds->dbname=(char*)MSF::myMalloc(strlen(dbName));
+		strcpy(tLQds->dbname,dbName);
+		MSF::myFree(dbName);
+		dbName=0;
+		}
+	else
+		{
+		tLQds->dbname=(char*)MSF::myMalloc(strlen(DLQH::dBName));
+		strcpy(tLQds->dbname,DLQH::dBName);
+		}	
+	tLQds->objectName=(char*)MSF::myMalloc(strlen(tableName));
+	strcpy(tLQds->objectName,tableName);
+	MSF::myFree(tableName);
+	tableName=0;
+	printf("\n\tDataBaseName %s",tLQds->dbname);
+	printf("\n\tTableName %s",tLQds->objectName);
+	TLQH::displayList(cColumns);
+	if(pkeyNames!=NULL)	tLQds->pKeyFields=pkeyNames;
+	else			tLQds->pKeyFields=NULL;
+	if(uniqueNames!=NULL)	tLQds->uniqueFields=uniqueNames;
+	else			tLQds->uniqueFields=NULL;
+	tLQds->columns=cColumns;
+	
+	retValue=dbe->executeQuery(tLQds);//calling the DBEngine Facade Interface	
+	
+	TLQH::freeList(tLQds); //problem to be solved
+	position=0;
+	cColumns=NULL;
+	pkeyNames=NULL;
+	uniqueNames=NULL;
+	printf("\n");
+	resetOnError();
+	vSB->displayBufferStatisitics();
+	vSB->queryStats();
+	return retValue;
+	}
+			
+int DBQuery(char *dbname,int type)
+	{
+	int retValue=SUCCESS;
+	DLQds *d;
+	d=(DLQds*)MSF::myMalloc(sizeof(DLQds));
+	if(dbname!=NULL)
+		{
+		d->objectName=(char*)MSF::myMalloc(strlen(dbname));
+		strcpy(d->objectName,dbname);
+		}
+	else 
+		d->objectName=NULL;	
+	d->queryType=type;
+	retValue=dbe->executeQuery(d);//calling the DBEngine Facade Interface
+	MSF::myFree(d->objectName);
+	MSF::myFree(d);
+	printf("\n");
+	resetOnError();
+	vSB->displayBufferStatisitics();
+	vSB->queryStats();
+	return retValue;
+	}
+	
+void start()
+	{
+	dbe=VSDBEngine::getInstance(DBFILENAME,1500);
+	selectHan=SQH::getInstance();
+	deleteHan=DQH::getInstance();
+	updateHan=UQH::getInstance();
+	vSB=VSBufferManager::getInstance();
+	}
+			
+int main(int argc,char *argv[])
+        {
+	//system("clear");
+	char tts[100];
+	start();
+	FILE *tt=fopen(UDBFILE,"r");	
+	if(tt!=NULL)	
+		{
+		fscanf(tt,"%s",&tts);
+		MSF::myFree(DLQH::dBName);
+		DLQH::dBName=(char*)MSF::myMalloc(strlen(tts));
+		strcpy(DLQH::dBName,tts);
+		fclose(tt);	
+		}
+	FILE *fp;
+	if(argc>1)              // input file is given .sql file with DDL DML statements
+		{
+		fp=fopen(argv[1],"r");
+		if(fp==NULL)
+			{
+			printf("\n Invalied input file! \"%s\"\n",argv[1]);
+			goto END;
+			}
+		yyin=fp;
+        	do
+          		{
+          		yyparse();
+          		}while(feof(yyin)==0);
+		fclose(yyin);
+		fclose(fp);	
+		printf("\n venki ");	
+		goToPrompt();	
+		goto END;
+		}
+	else                    // If Command Interpreter is preferred  
+		{
+		//system("clear");
+		promptFlag=1;
+	        //printf("\n\t Welcome to My RDBMS Software.... type help to know the commands available-->\n");	
+		goToPrompt();
+		goto END;
+		}
+END:	                             //single point exit
+	resetOnError();
+	tt=fopen(UDBFILE,"w");
+	fprintf(tt,"%s",DLQH::dBName);
+	fclose(tt);	
+	exit(0);
+	}
+
+	
+void getInputFromFile(char *fileName,int from,int upto)
+	{
+	printf("\n Inside the func: %s %d %d\n",fileName,from,upto);
+	FILE *fp;
+	fp=fopen(fileName,"r");
+	fclose(yyin);
+	yyin=fp;
+	printf("\n venki here\n");
+        //do
+          //	{
+          	yyparse();
+          //	}while(feof(yyin)==0);
+	fclose(yyin);
+	printf("\n I am here");	
+	goToPrompt();
+	printf("\n I am here");
+	/*	
+	char command[300];
+	int index=0,i;
+	FILE *tempFile;
+	long ln=0;
+	char ch;
+	FILE *fp=fopen(fileName,"r");
+	while((ch=fgetc(fp))!=EOF)
+		{
+		if(ch!=';')
+			{
+			if(ch!='\n')	 
+			command[index++]=ch;
+			}
+		if(ch==';')
+			{
+			tempFile=fopen("temp","w");
+			command[index]='\0';	
+			printf("\tCOMMAND is  \"%s\"\n",command);
+			fprintf(tempFile,"%s",command);
+			fclose(tempFile);
+			tempFile=fopen("temp","r");
+			fclose(yyin);
+			yyin=tempFile;
+        		yyparse();
+			fclose(tempFile);
+			index=0;				
+			}
+		}
+	goToPrompt();
+	printf("\n Here\n");
+	*/
+	}		
+		 
+  W

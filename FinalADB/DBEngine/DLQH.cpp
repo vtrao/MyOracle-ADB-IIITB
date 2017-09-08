@@ -1,0 +1,347 @@
+#include "BufferManager/standards.h"
+#include "VSDBEngine.h"
+/****************************Create Database Query Handler************************************/
+CDQH* CDQH :: singleInstance_C=0;
+
+CDQH* CDQH :: getInstance()
+        {
+        if(singleInstance_C==0)
+		{
+#ifdef DBCONDES		
+		printf("\n\t\tIn Static Invoker of CDQH of DLQH");
+#endif				
+                singleInstance_C=new CDQH();
+		}
+	return singleInstance_C;
+        }
+
+CDQH :: CDQH()
+        {
+#ifdef DBCONDES
+	printf("\n\t\t  In Constructor of CDQH of DLQH");
+#endif	
+	iQH_C=IQH :: getInstance();
+	sCH_C=SysCatHan::getInstance();
+	}
+	
+CDQH :: ~CDQH()
+	{
+#ifdef DBCONDES
+	printf("\n\t\t  In Destructor of CDQH of DLQH");
+#endif	
+	}	
+
+int CDQH :: executeCreateDB(DLQds *d)
+	{
+	int retValue=SUCCESS;
+	if(sCH_C->returnDataBaseExistence(d->objectName,CHECK)==SUCCESS)
+		{
+		printf("\n\tDataBase \"%s\" Already Exists\n",d->objectName);
+		retValue=FAILED;
+		goto ECDBEND;
+		}
+	else
+		{
+		RLQds *rDS=0;
+		rDS=(RLQds*)MSF::myMalloc(sizeof(RLQds)); // inserting sys value
+		rDS->objectName=(char*)MSF::myMalloc(strlen("dbcat"));
+		strcpy(rDS->objectName,"dbcat");
+		rDS->values=NULL;
+		rDS->names=NULL;	
+		RLQH :: insertToAttList(&rDS->values,d->objectName);
+		iQH_C->insertToCatTables(rDS);
+		RLQH :: freeList(rDS);
+		printf("\n\tDatabase \"%s\" has been Successfully Created\n",d->objectName);
+		goto ECDBEND;
+		}		
+ECDBEND:
+	return retValue;
+	}	
+
+/****************************Use    Database Query Handler************************************/
+UDQH* UDQH :: singleInstance_C=0;
+
+UDQH* UDQH :: getInstance()
+        {
+        if(singleInstance_C==0)
+		{
+#ifdef DBCONDES		
+		printf("\n\t\tIn Static Invoker of UDQH of DLQH");
+#endif			
+                singleInstance_C=new UDQH();
+		}
+        return singleInstance_C;
+        }
+
+UDQH :: UDQH()
+        {
+#ifdef DBCONDES
+	printf("\n\t\t  In Constructor of UDQH of DLQH");
+#endif	
+	sCH_C=SysCatHan::getInstance();
+	}
+
+UDQH :: ~UDQH()
+	{
+#ifdef DBCONDES
+	printf("\n\t\t  In Destructor of UDQH of DLQH");
+#endif	
+	}
+	
+int UDQH :: executeUseDB(DLQds *d)
+	{	
+	int retValue=SUCCESS;
+	if(sCH_C->returnDataBaseExistence(d->objectName,CHECK)==SUCCESS)// database exists
+                {
+		if(DLQH::dBName!=0)	MSF::myFree(DLQH::dBName);
+		DLQH::dBName=(char*)MSF::myMalloc(strlen(d->objectName));
+		strcpy(DLQH::dBName,d->objectName);
+		if(d->queryType==USEDATABASE)	printf("\n\tRequest Successful: DataBase \"%s\" is in Use\n",DLQH::dBName);
+		goto EUDBEND;
+                }
+        else	
+		{
+		printf("\n\tRequest UnSuccessful: DataBase \"%s\" doesnot Exist\n",d->objectName);
+                retValue=FAILED; // database doesnot exist		  
+		goto EUDBEND;
+		}
+EUDBEND:
+	return retValue;		
+	}	
+
+/****************************Show   Database Query Handler************************************/
+SDQH* SDQH :: singleInstance_C=0;
+
+SDQH* SDQH :: getInstance()
+        {
+        if(singleInstance_C==0)
+		{
+#ifdef DBCONDES		
+		printf("\n\t\tIn Static Invoker of SDQH of DLQH");
+#endif			
+                singleInstance_C=new SDQH();
+		}
+        return singleInstance_C;
+        }
+
+SDQH :: SDQH()
+        {
+#ifdef DBCONDES
+	printf("\n\t\t  In Constructor of SDQH of DLQH");
+#endif		
+	sCH_C=SysCatHan::getInstance();	
+        }
+
+SDQH :: ~SDQH()
+	{
+#ifdef DBCONDES
+	printf("\n\t\t  In Destructor of SDQH of DLQH");
+#endif	
+	}
+	
+int SDQH :: executeShowDB(DLQds *d)
+	{
+	int retValue=SUCCESS;	
+	if(d->objectName!=NULL)
+		{
+		if(sCH_C->returnDataBaseExistence(d->objectName,CHECK)==SUCCESS) // database exists
+                	{
+			char *v;
+			v=DLQH::dBName;
+			DLQH::dBName=(char*)MSF::myMalloc(strlen(d->objectName));
+			strcpy(DLQH::dBName,d->objectName);
+			sCH_C->returnTableExistence("",d->objectName,DISPLAY);
+			MSF::myFree(DLQH::dBName);
+			DLQH::dBName=v;
+                	}	
+       		else
+			{
+			printf("\n\tDataBase \"%s\" doesnot exist\n",d->objectName);
+                	retValue=FAILED; // database doesnot exist
+			goto ESDBEND;
+			}
+		}
+	else
+		{
+		if(d->queryType==SHOWD)
+			printf("\n\tCurrent Database in Use is \"%s\"\n",DLQH::dBName);
+		else	
+			sCH_C->returnDataBaseExistence(d->objectName,DISPLAY);					
+		}	
+ESDBEND:
+	return retValue;		
+	}
+
+/****************************Drop   Database Query Handler************************************/
+DDQH* DDQH :: singleInstance_C=0;
+
+DDQH* DDQH :: getInstance()
+        {
+        if(singleInstance_C==0)
+		{
+#ifdef DBCONDES		
+		printf("\n\t\tIn Static Invoker of DDQH of DLQH");
+#endif			
+                singleInstance_C=new DDQH();
+		}
+        return singleInstance_C;
+        }
+
+DDQH :: DDQH()
+        {
+#ifdef DBCONDES
+	printf("\n\t\t  In Constructor of DDQH of DLQH");
+#endif		
+	sCH_C=SysCatHan::getInstance();	
+	tS_C =TableScan::getInstance();
+	rH_C=RH::getInstance();
+        }
+
+DDQH :: ~DDQH()
+	{
+#ifdef DBCONDES
+	printf("\n\t\t  In Destructor of DDQH of DLQH");
+#endif	
+	}
+	
+int DDQH :: executeDropDB(DLQds *d) //still something is required to be done
+	{
+	int retValue=SUCCESS;
+#ifdef VERBOSEMODE	
+	printf("\n\t\tInside executeDropDB method of DDQH class");	
+#endif	
+	if(!strcmp(d->objectName,"sys") || !strcmp(d->objectName,"Default"))
+		{
+		retValue=FAILED;
+		printf("\n\tDatabase \"%s\" cannot be Deleted\n",d->objectName);
+		goto EDDBEND;
+		}
+	if(!strcmp(d->objectName,DLQH::dBName))
+		{
+		printf("\nDeleting the Current database in USE: Setting to Use \"Default\" Database");
+		if(DLQH::dBName!=0)	MSF::myFree(DLQH::dBName);
+		DLQH::dBName=(char*)MSF::myMalloc(strlen("Default"));
+		strcpy(DLQH::dBName,"Default");
+		}	
+	if(d->objectName!=NULL)
+		{		
+		if(sCH_C->returnDataBaseExistence(d->objectName,CHECK)==SUCCESS) // database exists
+                	{
+			DTQH *tempDTQH=DTQH::getInstance();
+			Fetch *f=Fetch::getInstance();
+			createColumns *columns=NULL;
+			AttributeValues *values=NULL,*tempValues;
+			//printf("\nSUCCESSFFUL");
+			RID *ri=NULL;	
+			RID *r=NULL;
+			tS_C->doTableScan("tcat","sys",&r,NULL,CHECK,"dbname",d->objectName,EQ);
+			sCH_C->getDetailsOfFields("tcat","sys",&columns);
+			f->fetchColumnValues(r,&values,"tname", columns);
+			tempValues=values;
+			TLQds *tLQds=(TLQds*)MSF::myMalloc(sizeof(TLQds));
+			tLQds->dbname=(char*)MSF::myMalloc(strlen(d->objectName));
+			strcpy(tLQds->dbname,d->objectName);
+			tLQds->objectName=NULL;
+			tLQds->columns=NULL;
+			tLQds->pKeyFields=NULL;
+			tLQds->uniqueFields=NULL;
+			while(tempValues!=NULL)
+				{
+				if(tLQds->objectName==NULL)	{}
+				else				
+					{
+					MSF::myFree(tLQds->objectName);
+					tLQds->objectName=NULL;
+					}
+				tLQds->objectName=(char*)MSF::myMalloc(strlen(tempValues->value));
+				strcpy(tLQds->objectName,tempValues->value);
+				tempDTQH->executeDropT(tLQds);	
+				//printf("\n %s is table",tempValues->value);				
+				tempValues=tempValues->next;
+				}
+			TLQH :: freeList(tLQds);			
+			tS_C->doTableScan("dbcat","sys",&ri,NULL,CHECK,"dbname",d->objectName,EQ);
+			
+			rH_C->deleteRecord(ri);
+			RLQH::freeAttList(values);
+			TLQH::freeCColumns(columns);
+			//RH::displayRIDList(ri);
+			RH::freeRIDList(ri);
+			RH::freeRIDList(r);
+			}
+		else
+			{
+			printf("\n\tDataBase \"%s\" doesnot exist\n",d->objectName);
+                	retValue=FAILED; // database doesnot exist
+			goto EDDBEND;
+			}	
+		}	
+	else
+		{
+		printf("\n\tDataBase \"%s\" doesnot exist\n",d->objectName);
+                retValue=FAILED; // database doesnot exist
+		goto EDDBEND;
+		}
+	
+EDDBEND:		
+	return retValue;			
+	}	
+
+/****************************Database Level Query Handler*************************************/
+DLQH* DLQH :: singleInstance_C=0;
+
+char* DLQH :: dBName=0;
+
+DLQH* DLQH :: getInstance()
+        {
+        if(singleInstance_C==0)
+		{
+#ifdef DBCONDES		
+		printf("\n\tIn Static Invoker of DLQH");
+#endif			
+                singleInstance_C=new DLQH();
+		}
+        return singleInstance_C;
+        }
+
+DLQH :: DLQH()
+        {
+#ifdef DBCONDES
+	printf("\n\t  In Constructor of DLQH");
+#endif	
+	cDQH_C= CDQH::getInstance();
+	uDQH_C= UDQH::getInstance();
+	sDQH_C= SDQH::getInstance();
+	dDQH_C= DDQH::getInstance();
+	dBName=(char*)MSF::myMalloc(strlen("Default"));
+	strcpy(dBName,"Default");
+        }
+
+DLQH :: ~DLQH()
+	{
+#ifdef DBCONDES
+	printf("\n\t  In Destructor of DLQH");
+#endif	
+	cDQH_C->~CDQH();
+	uDQH_C->~UDQH();	
+	sDQH_C->~SDQH();
+	dDQH_C->~DDQH();
+	}
+		
+int DLQH :: executeDLQ(DLQds *d)
+	{
+	int retValue=0;
+#ifdef VERBOSEMODE
+	printf("\n\tInside executeDLQ of DLQH Class");	
+#endif	
+	if(d->queryType==CREATEDATABASE)
+                retValue=cDQH_C->executeCreateDB(d);
+        else if(d->queryType==USEDATABASE || d->queryType==CHECKDB)
+                retValue=uDQH_C->executeUseDB(d);
+        else if(d->queryType==DROPDATABASE)
+                retValue=dDQH_C->executeDropDB(d);
+        else if(d->queryType==SHOWDATABASE || d->queryType==SHOWD)
+                retValue=sDQH_C->executeShowDB(d);
+	return retValue;	
+	}	
+  
